@@ -68,7 +68,7 @@ Function Start-Script {
 
 Function Send-Email {
     Param(
-        [string]$Sender,
+        [string]$FromAddress,
         $Recipients,
         $CCRecipients,
         $BCCRecipients,
@@ -111,7 +111,7 @@ Function Send-Email {
 	}
 
     $MessageParams = @{
-        From = $Sender;
+        From = $FromAddress;
         To = $Recipients;
         SmtpServer = $SmtpServer;
         #UseSSL = $True;
