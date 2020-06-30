@@ -1,1 +1,3 @@
-variables.json
+settings.json
+*.log
+Reports

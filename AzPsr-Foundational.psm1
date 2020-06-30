@@ -1,67 +1,163 @@
-# Default values for emailing reports. These can be overridden by re-defining this hashtable in a specific script
-$ReportEmailDefaults = @{
-	"SmtpServer" = "smtprelay.sigconsult.com";
-	"Recipients" = "admins@sigconsult.com";
-	"CCRecipients" = "";
-	"BCCRecipients" = "";
-}
-
-# Useful Functions
+# Requires -Version 8
 
 Function Connect-AzSp {
-    If (-not $AzSpThumb -and -not $CreateAzSp) {
-        Throw "This script requires an Azure AD Service Principal. To create one, use the -CreateAzSp parameter and then populate the $AzSpThumb variable with the provided value"
-    }
-
-    If ($CreateAzSp) {
-        Connect-AzureAD
-
-        $notAfter = (Get-Date).AddMonths(12) # Valid for 12 months
-        $cert = New-SelfSignedCertificate -DnsName $tenantName -CertStoreLocation "cert:\LocalMachine\My" -KeyExportPolicy NonExportable -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" -NotAfter $notAfter
-        $thumb = $cert.Thumbprint
-        $keyValue = [System.Convert]::ToBase64String($cert.GetRawCertData())
-
-        $application = New-AzureADApplication -DisplayName "Acordis Consulting Reporting Scripts" -IdentifierUris "https://acordisconsulting.com"
-        New-AzureADApplicationKeyCredential -ObjectId $application.ObjectId -CustomKeyIdentifier "acordis" -Type AsymmetricX509Cert -Usage Verify -Value $keyValue
-
-        $sp = New-AzureADServicePrincipal -AppId $application.AppId
-
-        Add-AzureADDirectoryRoleMember -ObjectId (Get-AzureADDirectoryRole -Filter 'DisplayName eq "Global Readers"').Objectid -RefObjectId $sp.ObjectId
-        $AzTenantId = (Get-AzTenant).Id
-
-        "Service Principal created. Update the script file with the following parameters:"
-        "`$AzTenantId = $AzTenantId"
-        "`$AzAppId = $($application.AppId)"
-        "`$AzSpThumb = $thumb"
-        Read-Host -Prompt "Press any key to exit."
-        Exit
-    }
+    Param(
+        [string[]]$Services
+    )
+    $AzSpThumb = $ScriptSettings.AzureConnection.AzSpThumb
+    $AzAppId = $ScriptSettings.AzureConnection.AzAppId
+    $AzTenantId = $ScriptSettings.AzureConnection.AzTenantId
 
     If ( $AzSpThumb -and $AzTenantId -and $AzAppId ) {
-        Connect-AzAccount -CertificateThumbprint $AzSpThumb -ApplicationId $AzAppId -Tenant $AzTenantId -ServicePrincipal
+        Try {
+            [void](Connect-AzAccount -CertificateThumbprint $AzSpThumb -ApplicationId $AzAppId -Tenant $AzTenantId -ServicePrincipal -ErrorAction Stop)
+        } Catch {
+            Write-Log "Failed to connect to Azure AD using the Service Principal info provided. Check your settings file and try again. The specific error is: $_" -Level "ERROR" -Fatal
+        }
+
+        Try {
+            $cert = Get-Item Cert:\CurrentUser\My\$AzSpThumb -ErrorAction Stop
+            [void](Connect-Graph -CertificateName $cert.Subject -ClientId $AzAppId -TenantId $AzTenantId -ErrorAction Stop)
+        } Catch {
+            Write-Log "Failed to connect to Microsoft Graph using the Service Principal info provided. Check your settings file and try again. The specific error is: $_" -Level "ERROR" -Fatal
+        }
+    } Else {
+        Write-Log "The Azure PS Reporting scripts require a certificate-based Azure AD Service Principal to connect to your tenant. Use the 'New-AzPsrServicePrincipal.ps1' script to generate a new service principal. If you already have a service principal, configure the settings file (AzureConnection object) with the connectivity info for your tenant." -Level "ERROR" -Fatal
     }
 }
 
-Function Start-Script {
-	# Read in the Variables.json file
-	If (Test-Path "variables.json" ) {
-		$variablesData = Get-Content -Raw -Path "variables.json" | ConvertFrom-Json
-	} Else {
-		Throw "variables.json file not found. This file is required to connect to your Azure AD / Office 365 environment"
-	}
+Function Exit-Script {
+    Write-Log "Exiting script...`r`n"
+    If ( $Global:UnloadModulesOnExit) {
+        If ( Get-Module "AzPsr-Foundational") {
+            Write-Log "Unloading the AzPsr-Foundational module"
+            [void](Disconnect-Graph -ErrorAction SilentlyContinue)
+            [void](Disconnect-AzAccount -ErrorAction SilentlyContinue)
+            Remove-Module AzPsr-Foundational -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Exit
+}
 
+Function Get-Confirmation {
+	Param(
+		[string]$Message,
+		[switch]$ExitOnNo,
+		[switch]$DefaultToYes,
+		[string]$CustomOptions
+	)
+
+	If ( $CustomOptions ) {
+		If ( $CustomOptions -cmatch "[A-Z]") {
+			$DefaultOption = $Matches[0]
+		}
+		$Options = $CustomOptions -split ","
+
+		$confirmation = Read-Host "$Message`n[$( $Options -join "/")]"
+
+		If ( $DefaultOption -and ($confirmation -eq "") ) {
+			Return $DefaultOption
+		}
+
+		While ( $Options -notcontains $confirmation ) {
+			$confirmation = Read-Host "Invalid option. `n$Message`n[$( $Options -join " / ")]"
+		}
+		Return $confirmation
+	} Else {
+		If ( $DefaultToYes ) { $YesVar = "Y" } Else { $YesVar = "y" }
+
+		Do {
+			$confirmation = Read-Host "$Message [$YesVar/n]"
+
+			Switch ( $confirmation ) {
+				"n" {
+					If ( $ExitOnNo ) {
+						Write-Log "User declined confirmation." -Level "ERROR" -Fatal
+					} Else {
+						Return $False
+					}
+					Break
+				}
+				"y" {
+					Return $True
+				}
+				default {
+					If ( $DefaultToYes -and ($confirmation -eq "") ) { Return $True }
+				}
+			}
+		} While ( -not $validInput )
+	}
+}
+
+Function Invoke-ScriptInit {
+    Param(
+        [string]$ScriptName = "Azure PS Reporting"
+    )
+
+    # Read in the Settings.json file
+    If (-not $global:SettingsFilePath) {
+        $global:SettingsFilePath = ".\Settings.json"
+    }
+
+	If (Test-Path $global:SettingsFilePath ) {
+		$global:ScriptSettings = Get-Content -Raw -Path $global:SettingsFilePath | ConvertFrom-Json
+	} Else {
+		Throw "$($global:SettingsFilePath).json file not found. This file is required to connect to your Azure AD / Office 365 environment"
+    }
+    
+    # Initialize the log
+    $script:LogFile = ( $global:ScriptSettings.ScriptConfig.Logfile -ne 'default' ) ? $global:ScriptSettings.ScriptConfig.Logfile : ".\$ScriptName - $(Get-Date -Format "yyyy-MM-dd hh-mm-tt").log"
+
+    Write-Host "Loaded module $($MyInvocation.ScriptName -replace '.psm1','')"
+    Write-Host "Using log file $LogFile..."
+
+    If ( -not (Test-Path $LogFile ) ) {
+        Try {
+            Write-Host "Creating log file..."
+            New-Item -Path $LogFile -ItemType file | Out-Null
+        } Catch {
+            Write-Host "Failed to create the log file. The specific error is:"
+            $_
+            Read-Host "Press a key to exit"
+            Exit
+        }
+    }
+
+    Write-Log "Initializing $ScriptName..."
+
+    # Get current user. You know, for accountability
+    $Executor = [Environment]::UserName
+    Write-Log "Welcome, $Executor. Your actions are being logged. You know, for accountability."
+    Start-Sleep -Seconds 1
 
     # Check for NuGet Package Provider
     If (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
-        Write-Warning -Message "NuGet package provider not found. Installing..."
-        Install-PackageProvider -Name NuGet -Force
+        If ( $global:ScriptSettings.ScriptConfig.AutoInstallTrustedModules ) {
+            If ( ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) ) {
+                Write-Log -Message "NuGet package provider not found. Installing..." -Level "WARNING"
+                PowerShell -Command {Install-PackageProvider -Name NuGet -Force}
+            } Else {
+                Write-Log -Message "Installing the PS Package Provider NuGet requires running the script in elevated (administrator) mode. Restart the script in admin mode, or install the module manually by starting *Windows PowerShell* as an admin and running: 'Install-PackageProvider -Name NuGet -Force'" -Level "ERROR" -Fatal
+            }
+        } Else {
+            Write-Log "NuGet package provider not found. To install it automatically, change 'AutoInstallTrustedModules' to 'true' in the settings file and re-run the script in an elevated (administrator) session." -Level "ERROR" -Fatal
+        }
     }
+    'Az', 'Microsoft.Graph' | ForEach {
+        If ( -not (Get-Module -Name $_ -ListAvailable)) {
+            If ( $global:ScriptSettings.ScriptConfig.AutoInstallTrustedModules ) {
+                Write-Log "Module $_ not found. Installing..."
+                Install-Module $_ -Force
+            } Else {
+                Write-Log "The script is not permitted to install modules. Change the 'AutoInstallTrustedModules' to 'true' in the settings file, or manually install the PS Module $_."
+            }
+        }
 
-    # Check for and install PS modules
-    'Az', 'AzureAD' | ForEach {
-        If (-not (Get-Module -Name $_ -ListAvailable)) {
-            Write-Warning -Message "PS Module '$_' not found. Installing..."
-            Install-Module -Name $_ -AllowClobber -Force
+        Try {
+            Write-Log "Importing PS module $_..."
+            Import-Module $_
+        } Catch {
+            Write-Log "Failed to import PS module. The specific error is: $_" -Level "ERROR" -Fatal
         }
     }
 }
@@ -78,6 +174,11 @@ Function Send-Email {
 		[string]$SmtpServer,
         $Attachments
     )
+
+    If ( $global:ScriptSettings.ReportEmail.DisableEmail ) {
+        Write-Log "Report emails are disabled in the loaded settings file $($global:SettingsFilePath). Skipping this step..."
+        Return
+    }
 
 	Switch ( $False ) {
 		($Subject) {
@@ -199,14 +300,6 @@ Function Write-Log {
     # Ignore VERBOSE entries If the "Verbose" flag is not set
     If ( $Level -eq "VERBOSE" -and $VerbosePreference -ne "Continue" ) { Return }
 
-    # Set the color for the console output and update counters
-    Switch ( $Level ) {
-        "WARNING" { $Color = "Yellow"; $TotalWarnings++; Break }
-        "ERROR" { $Color = "Red"; $TotalErrors++; Break }
-        "VERBOSE" { $Color = "Gray"; Break }
-        Default { $Color = "White" }
-    }
-
     $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
     If ( $Message -is [System.Management.Automation.ErrorRecord] ) {
@@ -216,6 +309,14 @@ Function Write-Log {
     }
 
 	If ( -not $Silent ) {
+        # Set the color for the console output and update counters
+        Switch ( $Level ) {
+            "WARNING" { $Color = "Yellow"; $TotalWarnings++; Break }
+            "ERROR" { $Color = "Red"; $TotalErrors++; Break }
+            "VERBOSE" { $Color = "Gray"; Break }
+            Default { $Color = "White" }
+        }
+
 		Write-Host $Output -Fore $Color
 	}
 
@@ -223,15 +324,7 @@ Function Write-Log {
 
     If ( $Fatal ) {
         "FATAL: The previous error was fatal. The script will now exit." | Add-Content $LogFile
-        Write-Host "FATAL: The previous error was fatal. The script will now poop the bed." -Fore Red
+        Write-Host "FATAL: The previous error was fatal. The script will now exit." -Fore Red
         Exit-Script
     }
 }
-
-Start-Script
-
-# Connect to Azure AD
-Connect-AzSp
-
-$exchangeSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "https://outlook.office365.com/powershell-liveid/" -Credential $o365Credential -Authentication "Basic" -AllowRedirection
-Import-PSSession $exchangeSession -DisableNameChecking
