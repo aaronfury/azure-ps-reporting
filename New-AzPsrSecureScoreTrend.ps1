@@ -36,12 +36,19 @@ Connect-AzSp -Services "Graph"
 # / CUSTOM FUNCTIONS
 
 # EXECUTE TASKS
-Write-Log "Retrieving Secure Score reports..."
-$SecureScores = Get-MgSecuritySecureScore
-Write-Log "Retrieved $($SecureScores.Count) reports"
-
-Write-Log "Retrieving Secure Score profiles..."
-$ScoreProfiles = Get-MgSecuritySecureScoreControlProfile
+Try {
+    Write-Log "Retrieving Secure Score reports..."
+    $SecureScores = Get-MgSecuritySecureScore -ErrorAction Stop
+    Write-Log "Retrieved $($SecureScores.Count) reports"
+} Catch {
+    Write-Log "Failed to retrieve Secure Score reports. The specific error is: $_" -Level "ERROR" -Fatal
+}
+Try {
+    Write-Log "Retrieving Secure Score profiles..."
+    $ScoreProfiles = Get-MgSecuritySecureScoreControlProfile
+} Catch {
+    Write-Log "Failed to retrieve Secure Score profiles. The specific error is: $_" -Level "ERROR" -Fatal
+}
 
 [int32]$NumberOfReports = $SecureScores.Count/7
 Write-Log "The script will process the last $NumberOfReports weeks of Secure Score reports."
@@ -60,7 +67,7 @@ $Output = @()
 [int]$noChange = 0
 
 ForEach ( $report in $Reports ) {
-    Write-Log "Generating report for $($report.CreatedDateTime)"
+    Write-Log "Processing report for $($report.CreatedDateTime.ToShortDateString())"
 
     $record = [ordered]@{
         "Date" = $report.CreatedDateTime;
@@ -99,7 +106,7 @@ If (-not (Test-Path ".\Reports")) {
 }
 
 $reportFileName = ".\Reports\Secure Score Analysis - $($Reports[-1].CreatedDateTime.ToString("yyyy-MM-dd")).csv"
-Write-Log "Saving report as '$reportFileName'"
+Write-Log "Saving analysis as '$reportFileName'"
 $Output | Export-Csv $reportFileName -NoTypeInformation
 
 # / EXECUTE TASKS

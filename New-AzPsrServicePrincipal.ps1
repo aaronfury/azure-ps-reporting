@@ -27,19 +27,40 @@ Try {
 } Catch {
     Write-Log "Failed to authenticate to Azure. The specific error is: $_" -Level "ERROR" -Fatal
 }
+# / SCRIPT PREPARATION
+
+# CUSTOM VARIABLES
+$ManualApiPerms+ @(
+    "GRAPH API: SecurityEvents : ReadAll"
+)
+# / CUSTOM VARIABLES
+
+# CUSTOM FUNCTIONS
+# / CUSTOM FUNCTIONS
+
+# EXECUTE TASKS
 
 $notBefore = (Get-Date).AddMonths(-1) # Backdate the cert just to make sure there's no timing issues
 $notAfter = (Get-Date).AddMonths(12) # Valid for 12 months
 $cert = New-SelfSignedCertificate -Subject "CN=AzPsr" -CertStoreLocation "cert:\CurrentUser\My" -KeyExportPolicy NonExportable -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" -NotAfter $notAfter -NotBefore $notBefore
 $keyValue = [System.Convert]::ToBase64String($cert.GetRawCertData())
 
-$sp = New-AzADServicePrincipal -DisplayName "Azure PS Reporting Scripts" -CertValue $keyValue -EndDate $cert.NotAfter -StartDate $cert.NotBefore
+Try {
+    $sp = New-AzADServicePrincipal -DisplayName "Azure PS Reporting Scripts" -CertValue $keyValue -EndDate $cert.NotAfter -StartDate $cert.NotBefore -ErrorAction Stop
+} Catch {
+    Write-Log "Failed to create an Azure AD Service Principal. The specific error is: $_" -Level "ERROR" -Fatal
+}
 
 $AzSpThumb = $cert.Thumbprint
 $AzAppId = $sp.ApplicationId
 $AzTenantId = (Get-AzTenant).Id
 
-New-AzRoleAssignment -RoleDefinitionName Reader -ServicePrincipalName $AzAppId
+Try {
+    New-AzRoleAssignment -RoleDefinitionName Reader -ApplicationId $AzAppId -ErrorAction Stop
+} Catch {
+    Write-Log "Failed to set the Azure Role Assignment 'Global Reader' for the Service Principal. The specific error is: $_" -Level "WARNING"
+    Write-Log "Once the script completes, you can try to manually assign the Azure Role 'Global Reader' to the Service Principal." -Level "WARNING"
+}
 
 Write-Host "Service Principal created. Update the settings file with the following parameters to use this certificate for future script execution:"
 Write-Host "AzTenantId : $AzTenantId"
@@ -49,6 +70,5 @@ Read-Host -Prompt "Press any key to continue"
 
 Write-Host "You must also configure the Azure application to grant the following permissions:"
 Write-Host "Azure Portal > Azure Active Directory > App registrations > Azure PS Reporting Scripts > API permissions"
-Write-Host "Azure Graph API"
-Write-Host "SecurityEvents : ReadWriteAll"
-Write-Host "Organization: ReadAll"
+$ManualApiPerms | ForEach { Write-Host $_ }
+Write-Host "You must then 'Grant admin consent for <Your organization>' to authorize the app for delegated access."

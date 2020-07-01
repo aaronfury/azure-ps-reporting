@@ -1,0 +1,18 @@
+{
+	"ScriptConfig" : {
+		"AutoInstallTrustedModules" : true,
+		"LogFile" : "default"
+	},
+	"AzureConnection" : {
+		"AzTenantId" : "REPLACE ME",
+		"AzAppId" : "REPLACE ME",
+		"AzSpThumb" : "REPLACE ME"
+	},
+	"ReportEmail" : {
+		"DisableEmailReports" : false,
+		"ReportEmailSmtpServer" : "",
+		"ReportEmailRecipients" : "",
+		"ReportEmailCCRecipients" : "",
+		"ReportEmailBCCRecipients" : ""
+	}
+}
