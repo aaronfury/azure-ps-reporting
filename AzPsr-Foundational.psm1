@@ -106,7 +106,7 @@ Function Invoke-ScriptInit {
     }
     
     # Initialize the log
-    $script:LogFile = ( $global:ScriptSettings.ScriptConfig.Logfile -ne 'default' ) ? $global:ScriptSettings.ScriptConfig.Logfile : ".\$ScriptName - $(Get-Date -Format "yyyy-MM-dd hh-mm-tt").log"
+    $script:LogFile = ( $global:ScriptSettings.ScriptConfig.Logfile -ne 'default' ) ? $global:ScriptSettings.ScriptConfig.Logfile : ".\Logs\$ScriptName - $(Get-Date -Format "yyyy-MM-dd hh-mm-tt").log"
 
     Write-Host "Loaded module $($MyInvocation.ScriptName -replace '.psm1','')"
     Write-Host "Using log file $LogFile..."
@@ -114,7 +114,7 @@ Function Invoke-ScriptInit {
     If ( -not (Test-Path $LogFile ) ) {
         Try {
             Write-Host "Creating log file..."
-            New-Item -Path $LogFile -ItemType file | Out-Null
+            New-Item -Path $LogFile -ItemType file -Force | Out-Null
         } Catch {
             Write-Host "Failed to create the log file. The specific error is:"
             $_
