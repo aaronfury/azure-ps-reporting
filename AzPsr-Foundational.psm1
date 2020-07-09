@@ -143,7 +143,7 @@ Function Invoke-ScriptInit {
             Write-Log "NuGet package provider not found. To install it automatically, change 'AutoInstallTrustedModules' to 'true' in the settings file and re-run the script in an elevated (administrator) session." -Level "ERROR" -Fatal
         }
     }
-    'Az', 'Microsoft.Graph' | ForEach {
+    'Az', 'Microsoft.Graph' | ForEach-Object {
         If ( -not (Get-Module -Name $_ -ListAvailable)) {
             If ( $global:ScriptSettings.ScriptConfig.AutoInstallTrustedModules ) {
                 Write-Log "Module $_ not found. Installing..."

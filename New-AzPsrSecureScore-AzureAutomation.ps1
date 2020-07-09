@@ -11,7 +11,7 @@ $storageResourceGroup = "production-default"
 $connectionName = "AzureRunAsConnection"
 
 $ReportFileNames = @{}
-"Running","Daily","Monthly" | ForEach { 
+"Running","Daily","Monthly" | ForEach-Object { 
 	$ReportFileNames[$_] = "SecureScoreAnalysis - $_.csv"
 }
 
@@ -97,16 +97,16 @@ $record = [ordered]@{
 
 ForEach ( $control in $CurrentReport.ControlScores ) {
 	$controlName = $control.ControlName
-	$scoreProfile = $ScoreProfiles | Where { $_.Id -eq $controlName }
+	$scoreProfile = $ScoreProfiles | Where-Object { $_.Id -eq $controlName }
 	@{
 		"$ControlName Score" = $control.Score;
-		"$ControlName Score Change" = $( if ( $PreviousReport ) { $control.Score - ($PreviousReport.ControlScores | Where {$_.ControlName -eq $control.ControlName}).Score } else { $noChange } );
+		"$ControlName Score Change" = $( if ( $PreviousReport ) { $control.Score - ($PreviousReport.ControlScores | Where-Object {$_.ControlName -eq $control.ControlName}).Score } else { $noChange } );
 		"$ControlName Highest Possible Score" = $scoreProfile.MaxScore;
 		"$ControlName Highest Possible Score Change" = $scoreProfile.MaxScore;
 		"$ControlName Score Percentage" = [int]($control.Score / $scoreProfile.MaxScore);
-		"$ControlName Score Percentage Change" = $( if ( $PreviousReport ) { [int]($control.Score / $scoreProfile.MaxScore) - [int]($($PreviousReport.ControlScores | Where {$_.ControlName -eq $control.ControlName}).Score  / $scoreProfile.MaxScore) } else { $noChange } );
+		"$ControlName Score Percentage Change" = $( if ( $PreviousReport ) { [int]($control.Score / $scoreProfile.MaxScore) - [int]($($PreviousReport.ControlScores | Where-Object {$_.ControlName -eq $control.ControlName}).Score  / $scoreProfile.MaxScore) } else { $noChange } );
 		"$ControlName Title" = $scoreProfile.Title;
-	}.GetEnumerator() | ForEach {
+	}.GetEnumerator() | ForEach-Object {
 		$record[$_.Key] = $_.Value
 	}
 }
