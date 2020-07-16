@@ -1,13 +1,13 @@
 <#
-	This script is a modified version of 'New-AzPsrSecureScore' and is intended to run on Azure Automation.
-	This version is meant to run every day and keep a "running log" of the results, and to copy the results to weekly and monthly logs
-	You will need to create a RunAs credential for the Automation account, and assign it the necessary GRAPH
-	permissions.
+This script is a modified version of 'New-AzPsrSecureScore' and is intended to run on Azure Automation.
+This version is meant to run every day and keep a "running log" of the results, and to copy the results to weekly and monthly logs
+You will need to create a RunAs credential for the Automation account, and assign it the necessary GRAPH
+permissions.
 #>
 
-$storageAccountName = "stgeneral01"
-$storageContainerName = "secure-score-reports"
-$storageResourceGroup = "production-default"
+$storageAccountName = "POPULATE ME!"
+$storageContainerName = "POPULATE ME!"
+$storageResourceGroup = "POPULATE ME!"
 $connectionName = "AzureRunAsConnection"
 
 $ReportFileNames = @{}
@@ -21,7 +21,9 @@ Function Get-ReportOnStorage {
 	)
 
 	Try {
-		$Report = Get-AzureStorageBlobContent -Container $storageContainerName -Blob $ReportFileNames[$ReportType] -ErrorAction Stop | ConvertFrom-Csv
+		Get-AzureStorageBlobContent -Container $storageContainerName -Blob $ReportFileNames[$ReportType] -ErrorAction Stop -Force
+		$Report = Import-Csv $ReportFileNames[$ReportType] -ErrorAction Stop
+		Remove-Item $ReportFileNames[$ReportType] -Force
 	} Catch {
 		Write-Host "Failed to retrieve the $ReportType report. The report may not exist. The specific error is: $_"
 		$Report = @()
@@ -132,10 +134,14 @@ Try {
 
 # Get and update the existing running report file
 $RunningReport = Get-ReportOnStorage -ReportType "Running"
+$RunningReport.Count
+$RunningReport
 $RunningReport += $record
 Set-ReportOnStorage -Report $RunningReport -ReportType "Running"
 
 $DailyReport = Get-ReportOnStorage -ReportType "Daily"
+$DailyReport.Count
+$DailyReport
 If ( (Get-Date).Day -eq 1 ) { # First day of month, aggregate data and update monthly report
 	$MonthlyReport = Get-ReportOnStorage -ReportType "Monthly"
 	$MonthSummary = @{
